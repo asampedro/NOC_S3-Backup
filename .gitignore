@@ -1,0 +1,16 @@
+# Configuración con valores de entorno (NO subir a GitHub)
+s3bkp.conf
+
+# Logs y artefactos de runtime
+backup.log
+*.log
+*.tar.gz
+
+# Directorios temporales
+/tmp/
+naemon_retention/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

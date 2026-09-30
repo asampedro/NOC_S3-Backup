@@ -1,0 +1,122 @@
+# s3bkp.conf.example — Plantilla de configuración para s3bkp
+#
+# Copiar como s3bkp.conf y editar los valores:
+#   cp s3bkp.conf.example s3bkp.conf
+#
+# El archivo s3bkp.conf debe estar en el mismo directorio que naemon_backup.py.
+# TODAS las secciones son obligatorias excepto [Retention] y [S3].
+
+[General]
+# Nombre del servicio que se respalda — aparece en el log y el asunto del email.
+# Ejemplos: Naemon, Grafana, NOC Server, etc.
+service_name = Naemon
+# Resolver symlinks al crear el archive:
+#   true  = copia el archivo destino del symlink (recomendado para restore)
+#   false = preserva el symlink tal cual (solo funciona si se restaura en el mismo path)
+# Default: true si se omite.
+dereference_symlinks = true
+
+[AWS]
+# Nombre del bucket S3 destino
+bucket_name = my-bucket-name
+# Prefijo (carpeta) dentro del bucket.
+# Para separar por host, incluir el subfolder:
+#   backups/naemon/Regional, backups/naemon/Cross, backups/naemon/NR
+#   backups/grafana, backups/noc-server, etc.
+s3_prefix = backups/naemon/Regional
+# Región de AWS donde está el bucket
+region = us-east-1
+
+# Proxy — OBLIGATORIO
+# Sin proxy no hay conexión a AWS desde la red corporativa.
+[Proxy]
+http_proxy = http://proxy.example.com:3128
+https_proxy = http://proxy.example.com:3128
+
+[Paths]
+# Archivo de log (soporta ~ para expandir el home del usuario).
+# Debe estar en un path accesible por el usuario que corre el script
+# y por Naemon (para el plugin de monitoreo).
+# Recomendado: /var/log/naemon/s3backup/S3backup.log (ver README)
+log_file = /var/log/naemon/s3backup/S3backup.log
+# Directorio temporal donde se crea el .tar.gz antes de subir
+tmp_dir = /tmp/naemon_backup
+# Directorio temporal para copiar retention.dat.
+# Solo obligatorio si [Retention] enabled = true.
+# Si retention está deshabilitado, este campo se puede omitir o dejar vacío.
+tmp_dir_retention = ~/naemon_retention
+
+[Retention]
+# true  = copia retention.dat y lo incluye en el archive (solo hosts con Naemon)
+# false = saltea la rutina, solo hace backup de [Backup_Paths]
+# Si esta sección no existe o enabled es false, source/owner/group/permissions
+# no son obligatorios y se ignoran.
+enabled = true
+source = /var/lib/naemon/retention.dat
+owner = naemon
+group = naemon
+# Permisos del archivo copiado (formato octal sin comillas)
+permissions = 660
+
+[Backup_Paths]
+# Rutas a incluir en el backup. Una por línea, indentadas.
+# retention.dat se incluye automáticamente si [Retention] enabled = true.
+# No es necesario listarla aquí.
+path =
+    /etc/naemon
+    /etc/thruk/cgi.cfg
+    /etc/thruk/htpasswd
+    /usr/lib/nagios/plugins
+    /var/log/naemon
+
+[Mail]
+# Servidor SMTP (normalmente localhost en el mismo host)
+smtp_host = localhost
+# Remitente del email
+from = Naemon-BKP
+# Destinatario (lista de NOC)
+to = noc@example.com
+
+[S3]
+# Número máximo de intentos de subida a S3 (1 intento + N retries).
+# 5 = 1 inicial + 4 retries con backoff exponencial.
+# Solo reintenta errores transitorios (timeouts, 5xx, throttling).
+# Errores permanentes (AccessDenied, NoSuchBucket) no se reintentan.
+# Sección opcional — si se omite, se usa max_retries = 5.
+max_retries = 5
+
+# ═══════════════════════════════════════════════════════════════════════
+# EJEMPLO: Configuración para un host SIN Naemon (sin retention.dat)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# [General]
+# service_name = Grafana
+#
+# [AWS]
+# bucket_name = my-bucket-name
+# s3_prefix = backups/grafana
+# region = us-east-1
+#
+# [Proxy]
+# http_proxy = http://proxy.example.com:3128
+# https_proxy = http://proxy.example.com:3128
+#
+# [Paths]
+# log_file = /var/log/grafana/s3backup.log
+# tmp_dir = /tmp/grafana_backup
+# # tmp_dir_retention no es necesario cuando retention está deshabilitado
+#
+# [Retention]
+# enabled = false
+# # source/owner/group/permissions no son necesarios
+#
+# [Backup_Paths]
+# path =
+#     /etc/grafana
+#     /var/lib/grafana
+#     /etc/nginx/conf.d/grafana.conf
+#
+# [Mail]
+# smtp_host = localhost
+# from = Grafana-BKP
+# to = noc@example.com
