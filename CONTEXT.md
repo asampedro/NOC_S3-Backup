@@ -76,7 +76,7 @@ El `s3_prefix` controla la ruta dentro del bucket. Cada host configura su propio
 - NR: `backups/naemon/NR`
 - Otros: `backups/grafana`, `backups/noc-server`, etc.
 
-La retención de backups antiguos se maneja con lifecycle policy del bucket, no desde el script.
+La retención de backups antiguos se maneja con lifecycle policy del bucket (expiración + transición a Deep Archive), no desde el script.
 
 ### Prefijos de log
 
@@ -139,16 +139,24 @@ Ver `naemon_config_example.cfg` para ambos ejemplos. Colocar en `/etc/naemon/con
 - **Dereference symlinks:** `[General] dereference_symlinks = true/false` (default: true). Cuando true, `tar.dereference = True` resuelve los symlinks y copia el archivo destino en lugar del link. Cuando false, preserva el symlink. Recomendado true para restore en cualquier ubicación.
 - **Monitoreo remoto via NRPE:** para backups que corren en hosts distintos al Naemon central, se usa NRPE. El plugin y el log viven en el host remoto; Naemon llama via `check_nrpe`. Alternativas descartadas: `check_by_ssh` (requiere SSH keys), sincronización de logs (punto de falla extra).
 
-## Deployment (ejemplo genérico)
+## Deployment
 
-- **Host:** `naemon_server_1`
+El script está desplegado en 3 servidores Naemon, cada uno con su propio `s3bkp.conf`:
+
+| Host | s3_prefix | Monitoreo |
+|---|---|---|
+| Naemon Regional | `backups/naemon/Regional` | Local |
+| Naemon Cross | `backups/naemon/Cross` | NRPE from Regional |
+| Naemon NewRelic | `backups/naemon/NR` | NRPE from Regional |
+
 - **Directorio del script:** `/home/noc_user/S3backup/`
-- **Config:** `/home/noc_user/S3backup/s3bkp.conf`
+- **Config:** `s3bkp.conf` en el mismo directorio que el script
 - **Log:** `/var/log/naemon/s3backup/S3backup.log`
 - **Crontab:** `00 22 * * * python3 /home/noc_user/S3backup/naemon_backup.py`
-- **S3 prefix:** `backups/naemon/Regional`
+- **S3 lifecycle policy:** configurada en el bucket para expiración y transición a Deep Archive
+- **Script viejo:** retirado del crontab (reemplazado por el nuevo)
 
-Para cada host, crear un `s3bkp.conf` con su `service_name`, `s3_prefix` y rutas específicas.
+Para nuevos hosts, crear un `s3bkp.conf` con su `service_name`, `s3_prefix` y rutas específicas.
 
 ## Archivos del proyecto
 
