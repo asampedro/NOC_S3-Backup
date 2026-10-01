@@ -1,6 +1,9 @@
 # Configuración con valores de entorno (NO subir a GitHub)
 s3bkp.conf
 
+# Context file for Toqan sessions (internal, not for public repo)
+CONTEXT.md
+
 # Logs y artefactos de runtime
 backup.log
 *.log
