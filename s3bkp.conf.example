@@ -4,11 +4,15 @@
 #   cp s3bkp.conf.example s3bkp.conf
 #
 # El archivo s3bkp.conf debe estar en el mismo directorio que naemon_backup.py.
-# TODAS las secciones son obligatorias excepto [Retention] y [S3].
+# Secciones obligatorias: [General], [AWS], [Proxy], [Paths], [Mail].
+# Secciones opcionales: [Retention], [S3], [Database], [Encrypt].
+# Si [Database] enabled = true, entonces [Database_List] es obligatoria.
+# [Backup_Paths] es opcional si [Database] enabled = true (backup solo de DBs).
+# Se requiere al menos [Backup_Paths] o [Database] con DBs configuradas.
 
 [General]
 # Nombre del servicio que se respalda — aparece en el log y el asunto del email.
-# Ejemplos: Naemon, Grafana, NOC Server, etc.
+# Ejemplos: Naemon, Grafana, Noctools, NOC Server, etc.
 service_name = Naemon
 # Resolver symlinks al crear el archive:
 #   true  = copia el archivo destino del symlink (recomendado para restore)
@@ -18,11 +22,11 @@ dereference_symlinks = true
 
 [AWS]
 # Nombre del bucket S3 destino
-bucket_name = my-bucket-name
+bucket_name = my-backup-bucket
 # Prefijo (carpeta) dentro del bucket.
 # Para separar por host, incluir el subfolder:
 #   backups/naemon/Regional, backups/naemon/Cross, backups/naemon/NR
-#   backups/grafana, backups/noc-server, etc.
+#   backups/noctools, backups/grafana, etc.
 s3_prefix = backups/naemon/Regional
 # Región de AWS donde está el bucket
 region = us-east-1
@@ -58,10 +62,84 @@ group = naemon
 # Permisos del archivo copiado (formato octal sin comillas)
 permissions = 660
 
+[Database]
+# Backup de bases de datos MySQL/MariaDB.
+# Si enabled = false o la sección no existe, se saltea el backup de DBs.
+# Si enabled = true, se requieren credentials_file, dump_dir y [Database_List].
+enabled = false
+# Container de Docker donde corre MySQL/MariaDB.
+# Si está vacío, ejecuta mysqldump directamente en el host.
+# Ejemplo: container = mariadb-prod
+container =
+# Host de la base de datos dentro del container (o del host si es directo).
+# En Docker, normalmente 127.0.0.1 para forzar TCP (recomendado).
+# Si está vacío, mysqldump usa el socket Unix por defecto.
+# Ejemplo: db_host = 127.0.0.1
+db_host =
+# Path al archivo de credenciales (formato INI, una sección por DB).
+# El archivo debe tener permisos restringidos (chmod 600).
+# Formato del archivo:
+#   [db_name]
+#   user = dbuser
+#   password = dbpass
+credentials_file = ~/.noctools/db-credentials.conf
+# Directorio temporal para los dumps (.sql y .tar.gz)
+dump_dir = /tmp/db_dumps
+# Opciones extra para mysqldump (se suman a las defaults).
+# Defaults: --single-transaction --routines --triggers --quick
+# Ejemplo: mysqldump_options = --hex-blob --no-tablespaces
+# Si está vacío, se usan solo las defaults.
+mysqldump_options =
+# Timeout del dump en segundos (0 = sin timeout, no recomendado).
+# Default: 300 (5 minutos)
+dump_timeout = 300
+# Espacio mínimo libre en dump_dir antes de cada dump (en MB).
+# Si el espacio es menor, el dump no se ejecuta y se loguea ERROR.
+# Default: 1024 (1 GB)
+min_free_space_mb = 1024
+
+[Database_List]
+# Nombres de las bases de datos a backupear. Una por línea, indentadas.
+# Cada nombre debe tener una sección correspondiente en el archivo de credenciales.
+db =
+    noctools_prod
+    grafana
+
+# ── Encriptación (opcional) ──────────────────────────────────────────────
+# Si está habilitada, los archives se encriptan con OpenSSL AES-256-CBC + PBKDF2.
+# La passphrase se lee del archivo de credenciales (sección [Encryption]).
+# Se encripta: configs sensibles ([Encrypt_Paths]) y/o DBs específicas ([Encrypt_Databases]).
+
+[Encrypt]
+# true  = encripta los archives listados en [Encrypt_Paths] y [Encrypt_Databases]
+# false = no encripta nada (todo va plano)
+# Si la sección no existe, default = false.
+enabled = false
+# Path al archivo que contiene la passphrase (mismo archivo que las credenciales de DB).
+# El archivo debe tener una sección [Encryption] con la clave passphrase.
+passphrase_file = ~/.noctools/db-credentials.conf
+
+[Encrypt_Paths]
+# Directorios o archivos sensibles que se backupearán en un archive SEPARADO
+# y encriptado. No pueden estar también en [Backup_Paths] (se valida al cargar).
+# Si [Encrypt] enabled = true y esta lista está vacía, el backup falla (ERROR).
+path =
+    /etc/noctools/secrets.conf
+    /opt/app/credentials
+
+[Encrypt_Databases]
+# Bases de datos cuyo dump se encriptará antes de subir a S3.
+# Si [Encrypt] enabled = true y esta lista está vacía, el backup falla (ERROR),
+# a menos que [Encrypt_Paths] tenga contenido.
+db =
+    noctools_prod
+
 [Backup_Paths]
 # Rutas a incluir en el backup. Una por línea, indentadas.
 # retention.dat se incluye automáticamente si [Retention] enabled = true.
 # No es necesario listarla aquí.
+# OPCIONAL si [Database] enabled = true (backup solo de DBs).
+# Se requiere al menos [Backup_Paths] o [Database_List] con DBs configuradas.
 path =
     /etc/naemon
     /etc/thruk/cgi.cfg
@@ -86,14 +164,15 @@ to = noc@example.com
 max_retries = 5
 
 # ═══════════════════════════════════════════════════════════════════════
-# EJEMPLO: Configuración para un host SIN Naemon (sin retention.dat)
+# EJEMPLO: Configuración para un host SIN Naemon y SIN DB (solo configs)
 # ═══════════════════════════════════════════════════════════════════════
 #
 # [General]
 # service_name = Grafana
+# dereference_symlinks = true
 #
 # [AWS]
-# bucket_name = my-bucket-name
+# bucket_name = my-backup-bucket
 # s3_prefix = backups/grafana
 # region = us-east-1
 #
@@ -110,6 +189,10 @@ max_retries = 5
 # enabled = false
 # # source/owner/group/permissions no son necesarios
 #
+# [Database]
+# enabled = false
+# # Si no hay DB, no se necesitan credentials_file, dump_dir ni [Database_List]
+#
 # [Backup_Paths]
 # path =
 #     /etc/grafana
@@ -119,4 +202,63 @@ max_retries = 5
 # [Mail]
 # smtp_host = localhost
 # from = Grafana-BKP
+# to = noc@example.com
+
+# ═══════════════════════════════════════════════════════════════════════
+# EJEMPLO: Configuración para un host CON DB en Docker
+# ═══════════════════════════════════════════════════════════════════════
+#
+# [General]
+# service_name = Noctools
+#
+# [AWS]
+# bucket_name = my-backup-bucket
+# s3_prefix = backups/noctools
+# region = us-east-1
+#
+# [Proxy]
+# http_proxy = http://proxy.example.com:3128
+# https_proxy = http://proxy.example.com:3128
+#
+# [Paths]
+# log_file = /var/log/naemon/s3backup/S3backup.log
+# tmp_dir = /tmp/noctools_backup
+#
+# [Retention]
+# enabled = false
+#
+# [Database]
+# enabled = true
+# container = mariadb-prod
+# db_host = 127.0.0.1
+# credentials_file = ~/.noctools/db-credentials.conf
+# dump_dir = /tmp/db_dumps
+# mysqldump_options = --hex-blob
+# dump_timeout = 300
+# min_free_space_mb = 1024
+#
+# [Database_List]
+# db =
+#     noctools_prod
+#
+# [Encrypt]
+# enabled = true
+# passphrase_file = ~/.noctools/db-credentials.conf
+#
+# [Encrypt_Paths]
+# path =
+#     /etc/noctools/secrets.conf
+#
+# [Encrypt_Databases]
+# db =
+#     noctools_prod
+#
+# [Backup_Paths]
+# path =
+#     /opt/noctools-deploy
+#     /etc/nginx/conf.d
+#
+# [Mail]
+# smtp_host = localhost
+# from = Noctools-BKP
 # to = noc@example.com
